@@ -1,6 +1,12 @@
 # OSX
 .DS_STORE
 
+# Source Documents
+source_documents/
+
+# Idea
+.idea/
+
 # Models
 models/
 
