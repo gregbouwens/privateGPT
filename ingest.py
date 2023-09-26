@@ -37,6 +37,7 @@ import chromadb
 persist_directory = os.environ.get('PERSIST_DIRECTORY')
 source_directory = os.environ.get('SOURCE_DIRECTORY', 'source_documents')
 embeddings_model_name = os.environ.get('EMBEDDINGS_MODEL_NAME')
+BATCH_SIZE = int(os.environ.get('BATCH_SIZE', 10000))  # Default to 41666 if not set
 chunk_size = 500
 chunk_overlap = 50
 
@@ -85,6 +86,7 @@ LOADER_MAPPING = {
 
 
 def load_single_document(file_path: str) -> List[Document]:
+    print(f"Processing file: {file_path}")  # <-- Add this line
     ext = "." + file_path.rsplit(".", 1)[-1].lower()
     if ext in LOADER_MAPPING:
         loader_class, loader_args = LOADER_MAPPING[ext]
@@ -107,12 +109,16 @@ def load_documents(source_dir: str, ignored_files: List[str] = []) -> List[Docum
         )
     filtered_files = [file_path for file_path in all_files if file_path not in ignored_files]
 
-    with Pool(processes=os.cpu_count()) as pool:
-        results = []
-        with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
-            for i, docs in enumerate(pool.imap_unordered(load_single_document, filtered_files)):
-                results.extend(docs)
-                pbar.update()
+    # with Pool(processes=os.cpu_count()) as pool:
+    #     results = []
+    #     with tqdm(total=len(filtered_files), desc='Loading new documents', ncols=80) as pbar:
+    #         for i, docs in enumerate(pool.imap_unordered(load_single_document, filtered_files)):
+    #             results.extend(docs)
+    #             pbar.update()
+
+    results = []
+    for file_path in filtered_files:
+        results.extend(load_single_document(file_path))
 
     return results
 
@@ -144,7 +150,7 @@ def main():
     # Create embeddings
     embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
     # Chroma client
-    chroma_client = chromadb.PersistentClient(settings=CHROMA_SETTINGS , path=persist_directory)
+    chroma_client = chromadb.PersistentClient(settings=CHROMA_SETTINGS, path=persist_directory)
 
     if does_vectorstore_exist(persist_directory, embeddings):
         # Update and store locally vectorstore
@@ -153,17 +159,55 @@ def main():
         collection = db.get()
         texts = process_documents([metadata['source'] for metadata in collection['metadatas']])
         print(f"Creating embeddings. May take some minutes...")
-        db.add_documents(texts)
+
+        # Add documents in batches
+        for i in range(0, len(texts), BATCH_SIZE):
+            batch = texts[i:i+BATCH_SIZE]
+            db.add_documents(batch)
+
     else:
         # Create and store locally vectorstore
         print("Creating new vectorstore")
         texts = process_documents()
         print(f"Creating embeddings. May take some minutes...")
-        db = Chroma.from_documents(texts, embeddings, persist_directory=persist_directory, client_settings=CHROMA_SETTINGS, client=chroma_client)
+        db = Chroma(persist_directory=persist_directory, embedding_function=embeddings, client_settings=CHROMA_SETTINGS, client=chroma_client)
+        # db = Chroma(texts, embeddings, persist_directory=persist_directory, client_settings=CHROMA_SETTINGS, client=chroma_client)
+
+        # Add documents in batches
+        for i in range(0, len(texts), BATCH_SIZE):
+            batch = texts[i:i+BATCH_SIZE]
+            db.add_documents(batch)
+
     db.persist()
     db = None
 
     print(f"Ingestion complete! You can now run privateGPT.py to query your documents")
+
+#
+# def main():
+#     # Create embeddings
+#     embeddings = HuggingFaceEmbeddings(model_name=embeddings_model_name)
+#     # Chroma client
+#     chroma_client = chromadb.PersistentClient(settings=CHROMA_SETTINGS , path=persist_directory)
+#
+#     if does_vectorstore_exist(persist_directory, embeddings):
+#         # Update and store locally vectorstore
+#         print(f"Appending to existing vectorstore at {persist_directory}")
+#         db = Chroma(persist_directory=persist_directory, embedding_function=embeddings, client_settings=CHROMA_SETTINGS, client=chroma_client)
+#         collection = db.get()
+#         texts = process_documents([metadata['source'] for metadata in collection['metadatas']])
+#         print(f"Creating embeddings. May take some minutes...")
+#         db.add_documents(texts)
+#     else:
+#         # Create and store locally vectorstore
+#         print("Creating new vectorstore")
+#         texts = process_documents()
+#         print(f"Creating embeddings. May take some minutes...")
+#         db = Chroma.from_documents(texts, embeddings, persist_directory=persist_directory, client_settings=CHROMA_SETTINGS, client=chroma_client)
+#     db.persist()
+#     db = None
+#
+#     print(f"Ingestion complete! You can now run privateGPT.py to query your documents")
 
 
 if __name__ == "__main__":

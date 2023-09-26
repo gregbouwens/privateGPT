@@ -7,6 +7,7 @@ if [ "$#" -ne 1 ]; then
 fi
 
 DIRECTORY="$1"
+OUTPUT_FILE="discovered_files.txt"
 
 # Extensions from LOADER_MAPPING
 EXTENSIONS=(
@@ -25,7 +26,12 @@ EXTENSIONS=(
     ".txt"
 )
 
+# Empty or create the output file
+> "$OUTPUT_FILE"
+
 # Search for files with matching extensions
 for ext in "${EXTENSIONS[@]}"; do
     find "$DIRECTORY" -type f -name "*$ext"
-done
+done | sort >> "$OUTPUT_FILE"
+
+echo "Results saved to $OUTPUT_FILE"
